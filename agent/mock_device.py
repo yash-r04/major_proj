@@ -2,6 +2,7 @@ import time
 import random
 import sys
 import os
+import numpy as np
 
 # Add root folder to path to enable clean imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
