@@ -1,58 +1,64 @@
 import React, { useState, useEffect } from 'react';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-import { Activity, ShieldCheck, Zap, TrendingUp, Cpu, Play, Pause, Lock, UserCheck, LogOut, Sliders, BatteryCharging } from 'lucide-react';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from 'recharts';
+import { Activity, ShieldCheck, Zap, TrendingUp, UserCheck, LogOut, Sliders, BatteryCharging, UserPlus, Users, RefreshCw, AlertCircle } from 'lucide-react';
 
-// Mock user profiles registered on the local P2P microgrid
-const USERS = {
-  bob: { id: 'bob', name: 'Bob (Prosumer Node 1)', role: 'Solar Heavy', solarCap: '5.0 kW', batCap: '10 kWh', avatar: '☀️' },
-  alice: { id: 'alice', name: 'Alice (Prosumer Node 2)', role: 'Demand Heavy', solarCap: '1.0 kW', batCap: '5 kWh', avatar: '🏠' },
-  david: { id: 'david', name: 'David (Prosumer Node 3)', role: 'Battery Arbitrage', solarCap: '3.0 kW', batCap: '15 kWh', avatar: '🔋' },
-  admin: { id: 'admin', name: 'Grid Operator (Admin)', role: 'Microgrid Admin', solarCap: 'N/A', batCap: 'N/A', avatar: '⚡' }
-};
+// Default registered microgrid prosumers with internal security credentials
+const INITIAL_NODES = [
+  { id: 'alice', name: 'Alice (Node-1)', pass: 'alice123', role: 'Solar Heavy', solarCap: 5.0, batCap: 10.0, address: '0x71C...3A1' },
+  { id: 'bob', name: 'Bob (Node-2)', pass: 'bob123', role: 'Demand Heavy', solarCap: 1.0, batCap: 5.0, address: '0x3B8...9F2' },
+  { id: 'david', name: 'David (Node-3)', pass: 'david123', role: 'Battery Arbitrage', solarCap: 3.0, batCap: 15.0, address: '0xF41...6D8' },
+];
 
 export default function App() {
+  // Registry & Auth State
+  const [nodes, setNodes] = useState(INITIAL_NODES);
   const [currentUser, setCurrentUser] = useState(null);
-  const [loginForm, setLoginForm] = useState({ username: 'bob', password: '' });
-  
-  // Simulation & Node state
+  const [selectedNodeId, setSelectedNodeId] = useState('');
+  const [passphrase, setPassphrase] = useState('');
+  const [authError, setAuthError] = useState('');
+
+  // New Participant Onboarding State
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [newNode, setNewNode] = useState({ name: '', pass: '', role: 'Solar Heavy', solarCap: '3.5', batCap: '7.0' });
+
+  // Telemetry & Polling State
   const [activeSlot, setActiveSlot] = useState(12);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [nodePreferences, setNodePreferences] = useState({
-    bob: { strategy: 'auto', maxSellPrice: 3.80, minSoc: 20 },
-    alice: { strategy: 'auto', maxBuyPrice: 4.50, minSoc: 30 },
-    david: { strategy: 'auto', maxSellPrice: 4.00, minSoc: 50 },
-  });
-
-  const [backendData, setBackendData] = useState(null);
+  const [nodePreferences, setNodePreferences] = useState({});
+  const [telemetry, setTelemetry] = useState(null);
   const [ledgerLogs, setLedgerLogs] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [isPolling, setIsPolling] = useState(false);
 
-  // Fetch telemetry from FastAPI backend if active
-useEffect(() => {
-  const fetchData = async () => {
+  // Poll backend server (http://127.0.0.1:5000)
+  const fetchBackendData = async () => {
+    setIsPolling(true);
     try {
-      // Changed port from 8000 to 5000
-      const telemetryRes = await fetch('http://localhost:5000/api/telemetry/24h');
-      if (telemetryRes.ok) {
-        const tJson = await telemetryRes.json();
-        setBackendData(tJson);
+      const telRes = await fetch('http://127.0.0.1:5000/api/telemetry/24h');
+      if (telRes.ok) {
+        const telJson = await telRes.json();
+        setTelemetry(telJson);
         setIsConnected(true);
       }
 
-      // Changed port from 8000 to 5000
-      const ledgerRes = await fetch('http://localhost:5000/api/ledger/blocks');
-      if (ledgerRes.ok) {
-        const lJson = await ledgerRes.json();
-        setLedgerLogs(lJson.logs || []);
+      const ledRes = await fetch('http://127.0.0.1:5000/api/ledger/blocks');
+      if (ledRes.ok) {
+        const ledJson = await ledRes.json();
+        setLedgerLogs(ledJson.logs || []);
       }
     } catch (err) {
-      console.warn("Flask backend offline, using fallback UI state.");
       setIsConnected(false);
+    } finally {
+      setIsPolling(false);
     }
   };
 
-  fetchData();
-}, []);
+  useEffect(() => {
+    fetchBackendData();
+    const interval = setInterval(fetchBackendData, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Timer loop for auto-stepping 24h simulation
   useEffect(() => {
     let timer;
@@ -64,310 +70,399 @@ useEffect(() => {
     return () => clearInterval(timer);
   }, [isPlaying]);
 
-  // Handle Login
+  // Onboard New Participant Node
+  const handleRegisterNode = (e) => {
+    e.preventDefault();
+    if (!newNode.name.trim() || !newNode.pass.trim()) return;
+
+    const nodeIdx = nodes.length + 1;
+    const createdNode = {
+      id: `node_${Date.now()}`,
+      name: `${newNode.name.trim()} (Node-${nodeIdx})`,
+      pass: newNode.pass.trim(),
+      role: newNode.role,
+      solarCap: parseFloat(newNode.solarCap) || 0,
+      batCap: parseFloat(newNode.batCap) || 0,
+      address: `0x${Math.random().toString(16).substring(2, 5).toUpperCase()}...${Math.random().toString(16).substring(2, 5).toUpperCase()}`
+    };
+
+    setNodes((prev) => [...prev, createdNode]);
+    setNewNode({ name: '', pass: '', role: 'Solar Heavy', solarCap: '3.5', batCap: '7.0' });
+    setIsRegistering(false);
+  };
+
+  // Authenticate Prosumer Account
   const handleLogin = (e) => {
     e.preventDefault();
-    if (USERS[loginForm.username]) {
-      setCurrentUser(USERS[loginForm.username]);
+    setAuthError('');
+
+    if (!selectedNodeId) {
+      setAuthError('Select a participant node.');
+      return;
     }
+
+    const found = nodes.find((n) => n.id === selectedNodeId);
+    if (!found) {
+      setAuthError('Node profile not found.');
+      return;
+    }
+
+    if (passphrase.trim() !== found.pass) {
+      setAuthError('Authentication failed: Invalid credentials or security signature.');
+      return;
+    }
+
+    setCurrentUser(found);
+    setPassphrase('');
   };
 
-  const handleLogout = () => {
-    setCurrentUser(null);
-  };
+  const chartData = telemetry?.data || Array.from({ length: 24 }, (_, i) => {
+    const hourStr = `${i.toString().padStart(2, '0')}:00`;
+    const solar = i >= 6 && i <= 18 ? Math.max(0, 5.0 * Math.sin((Math.PI * (i - 6)) / 12)) : 0;
+    const load = 1.2 + 1.5 * Math.exp(-Math.pow(i - 8, 2) / 4) + 2.0 * Math.exp(-Math.pow(i - 20, 2) / 4);
+    const mcp = Math.max(2.50, 5.25 - (solar * 0.45));
+    return {
+      hour: hourStr,
+      solar_pv: parseFloat(solar.toFixed(2)),
+      load_demand: parseFloat(load.toFixed(2)),
+      mcp: parseFloat(mcp.toFixed(2))
+    };
+  });
 
-  // Generate 24-hour mathematical curves for telemetry
-  const generateChartData = () => {
-    return Array.from({ length: 24 }, (_, i) => {
-      const hourStr = `${i.toString().padStart(2, '0')}:00`;
-      
-      let solar = i >= 6 && i <= 18 ? Math.max(0, 5.0 * Math.sin((Math.PI * (i - 6)) / 12)) : 0;
-      let load = 1.2 + 1.5 * Math.exp(-Math.pow(i - 8, 2) / 4) + 2.0 * Math.exp(-Math.pow(i - 20, 2) / 4);
+  const currentSlotData = chartData[activeSlot] || chartData[0];
+  const activeUserPref = nodePreferences[currentUser?.id] || { strategy: 'auto', maxSellPrice: 3.50 };
 
-      if (currentUser?.id === 'bob') {
-        solar *= 1.4; load *= 0.6;
-      } else if (currentUser?.id === 'alice') {
-        solar *= 0.2; load *= 1.3;
-      } else if (currentUser?.id === 'david') {
-        solar *= 0.8; load *= 0.9;
-      }
-
-      const mcp = Math.max(2.8, 5.25 - (solar * 0.45));
-
-      return {
-        time: hourStr,
-        solar: parseFloat(solar.toFixed(2)),
-        load: parseFloat(load.toFixed(2)),
-        mcp: parseFloat(mcp.toFixed(2)),
-      };
-    });
-  };
-
-  const chartData = generateChartData();
-  const currentSlotData = chartData[activeSlot];
-
-  const defaultLogs = [
-    { block: 14, hash: "0xbcf8070e9264bcaf12fea729dd7744d339dc7086ec4ffb6642f26f82c50e06e6", seller: "Bob (Node-1)", buyer: "Alice (Node-2)", volume: "0.74 kWh", price: "₹3.50" },
-    { block: 13, hash: "0x8619e5f8b2b4ad96c4f6b216fe56b64713ef738f225ed51cc667cafa5b73f8fb", seller: "Bob (Node-1)", buyer: "David (Node-3)", volume: "0.40 kWh", price: "₹3.50" },
-  ];
-
-  const activeLedgerLogs = ledgerLogs.length > 0 ? ledgerLogs : defaultLogs;
-
-  // Render Login Modal if not authenticated
+  // UNAUTHENTICATED GATEWAY
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 font-sans">
-        <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl max-w-md w-full">
+        <div className="bg-slate-900 border border-slate-800 p-8 rounded-xl shadow-xl max-w-md w-full">
           <div className="flex justify-center mb-4">
-            <div className="p-3 bg-amber-500/10 rounded-full border border-amber-500/30">
-              <Zap className="text-amber-400 w-8 h-8 fill-amber-400" />
+            <div className="p-3 bg-amber-500/10 rounded-full border border-amber-500/20">
+              <Zap className="text-amber-400 w-7 h-7" />
             </div>
           </div>
-          <h2 className="text-2xl font-bold text-center text-white mb-1">P2P Energy Trading Portal</h2>
-          <p className="text-xs text-slate-400 text-center mb-6">Select your prosumer node credentials to access asset controls</p>
+          <h2 className="text-xl font-bold text-center text-white mb-1">P2P Energy Network Access</h2>
+          <p className="text-xs text-slate-400 text-center mb-6">
+            Authenticate prosumer node credentials
+          </p>
 
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Select User Profile</label>
-              <select
-                value={loginForm.username}
-                onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
+          {authError && (
+            <div className="mb-4 p-2.5 bg-rose-950/60 border border-rose-500/30 text-rose-300 text-xs rounded-lg text-center flex items-center justify-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-400" />
+              <span>{authError}</span>
+            </div>
+          )}
+
+          {!isRegistering ? (
+            <div className="space-y-4">
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">Participant Node</label>
+                  <select
+                    value={selectedNodeId}
+                    onChange={(e) => setSelectedNodeId(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="" disabled>-- Select Node --</option>
+                    {nodes.map((node) => (
+                      <option key={node.id} value={node.id}>
+                        {node.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">Passphrase / Key</label>
+                  <input
+                    type="password"
+                    value={passphrase}
+                    onChange={(e) => setPassphrase(e.target.value)}
+                    placeholder="Enter node passphrase"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-amber-500 text-slate-950 font-semibold text-xs py-2.5 rounded-lg hover:bg-amber-400 transition flex items-center justify-center gap-2"
+                >
+                  <UserCheck className="w-4 h-4" /> Authenticate Node
+                </button>
+              </form>
+
+              <button
+                type="button"
+                onClick={() => setIsRegistering(true)}
+                className="w-full bg-slate-950 text-slate-300 border border-slate-800 hover:bg-slate-800 font-medium py-2.5 rounded-lg text-xs transition flex items-center justify-center gap-1.5 mt-2"
               >
-                <option value="bob">Bob — Solar Heavy Prosumer (Node 1)</option>
-                <option value="alice">Alice — Consumer Deficit (Node 2)</option>
-                <option value="david">David — Battery Arbitrage (Node 3)</option>
-                <option value="admin">Grid Operator (System Admin)</option>
-              </select>
+                <UserPlus className="w-4 h-4 text-amber-400" /> Register New Node
+              </button>
             </div>
+          ) : (
+            <form onSubmit={handleRegisterNode} className="space-y-3 bg-slate-950/60 p-4 rounded-lg border border-slate-800">
+              <h3 className="text-xs font-bold text-amber-400 flex items-center gap-2">
+                <UserPlus className="w-4 h-4" /> Prosumer Registration
+              </h3>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Passkey / Private Key</label>
-              <input
-                type="password"
-                placeholder="••••••••••••"
-                defaultValue="demo123"
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
-              />
-            </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Participant Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Charlie"
+                  value={newNode.name}
+                  onChange={(e) => setNewNode({ ...newNode, name: e.target.value })}
+                  className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
 
-            <button
-              type="submit"
-              className="w-full bg-amber-500 text-slate-950 font-bold py-2.5 rounded-lg hover:bg-amber-400 transition flex items-center justify-center gap-2 mt-2"
-            >
-              <UserCheck className="w-4 h-4" /> Authenticate & Access Node
-            </button>
-          </form>
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Set Passphrase</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="Enter passphrase"
+                  value={newNode.pass}
+                  onChange={(e) => setNewNode({ ...newNode, pass: e.target.value })}
+                  className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
 
-          <div className="mt-6 pt-4 border-t border-slate-800 text-center text-xs text-slate-500">
-            Encrypted Session • Web3 Key Pair Verified
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Operating Profile</label>
+                <select
+                  value={newNode.role}
+                  onChange={(e) => setNewNode({ ...newNode, role: e.target.value })}
+                  className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                >
+                  <option value="Solar Heavy">Solar Heavy (Net Exporter)</option>
+                  <option value="Demand Heavy">Demand Heavy (Net Consumer)</option>
+                  <option value="Battery Arbitrage">Battery Arbitrage Prosumer</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">PV Peak (kW)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={newNode.solarCap}
+                    onChange={(e) => setNewNode({ ...newNode, solarCap: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">Battery (kWh)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={newNode.batCap}
+                    onChange={(e) => setNewNode({ ...newNode, batCap: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="submit"
+                  className="flex-1 bg-amber-500 text-slate-950 font-semibold py-2 rounded text-xs hover:bg-amber-400 transition"
+                >
+                  Confirm Registration
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsRegistering(false)}
+                  className="px-3 bg-slate-800 text-slate-400 hover:text-white rounded text-xs transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+
+          <div className="mt-6 pt-4 border-t border-slate-800 text-center text-xs text-slate-500 flex justify-between items-center">
+            <span>Flask Engine (Port 5000)</span>
+            <span className="text-amber-400 font-mono">{nodes.length} Registered Nodes</span>
           </div>
         </div>
       </div>
     );
   }
 
-  // Active User Node Preferences
-  const activeUserPref = nodePreferences[currentUser.id] || { strategy: 'auto', maxSellPrice: 3.50, minSoc: 20 };
-
+  // AUTHENTICATED DASHBOARD
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 p-6 font-sans">
       
-      {/* Top Header with User Context */}
+      {/* Header */}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 pb-4 border-b border-slate-800 gap-4">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2 text-white">
-            <Zap className="text-amber-400 fill-amber-400" />
-            P2P Microgrid Energy Trading Platform
+          <h1 className="text-xl font-bold flex items-center gap-2 text-white">
+            <Zap className="text-amber-400" />
+            P2P Microgrid Dashboard
           </h1>
-          <p className="text-sm text-slate-400">PPO DRL Intelligence • Pay-as-Bid Market Engine • Web3 Ledger</p>
+          <p className="text-xs text-slate-400">PPO DRL Agent • Midpoint Double Auction Market • Web3 Audit Ledger</p>
         </div>
         
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700 text-xs">
+            <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`}></span>
+            <span className="text-slate-300">{isConnected ? 'Backend Active' : 'Offline'}</span>
+            <button onClick={fetchBackendData} className="ml-1 text-slate-400 hover:text-white" title="Refresh Telemetry">
+              <RefreshCw className={`w-3.5 h-3.5 ${isPolling ? 'animate-spin text-amber-400' : ''}`} />
+            </button>
+          </div>
+
           <div className="flex items-center gap-3 bg-slate-800 px-4 py-2 rounded-lg border border-slate-700">
-            <span className="text-xl">{currentUser.avatar}</span>
             <div className="text-xs">
               <span className="block font-bold text-white">{currentUser.name}</span>
-              <span className="text-amber-400 font-mono">{currentUser.role}</span>
+              <span className="text-amber-400 font-mono">{currentUser.address}</span>
             </div>
           </div>
 
           <button
-            onClick={handleLogout}
+            onClick={() => setCurrentUser(null)}
             className="p-2 bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 rounded-lg border border-slate-700 transition"
             title="Sign Out"
           >
-            <LogOut className="w-5 h-5" />
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </header>
 
-      {/* USER ASSET & ROLE CONTROL PANEL (User-Specific Preferences) */}
-      {currentUser.id !== 'admin' ? (
-        <div className="bg-slate-800/80 p-6 rounded-xl border border-amber-500/30 shadow-lg mb-8">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 pb-3 border-b border-slate-700">
-            <div className="flex items-center gap-2">
-              <Sliders className="text-amber-400 w-5 h-5" />
-              <h2 className="text-lg font-bold text-white">Personal Node Control Panel: {currentUser.name}</h2>
-            </div>
-            <span className="text-xs bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full border border-emerald-500/30 font-medium">
-              Authenticated Session Active
-            </span>
+      {/* Control Panel */}
+      <div className="bg-slate-800/80 p-5 rounded-xl border border-slate-700/80 shadow-lg mb-8">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 pb-3 border-b border-slate-700">
+          <div className="flex items-center gap-2">
+            <Sliders className="text-amber-400 w-4 h-4" />
+            <h2 className="text-sm font-bold text-white">Node Parameters: {currentUser.name}</h2>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            
-            {/* Strategy Selector */}
-            <div className="bg-slate-900/60 p-4 rounded-lg border border-slate-700">
-              <label className="block text-xs font-semibold text-slate-300 mb-2">Daily Trading Mode</label>
-              <select
-                value={activeUserPref.strategy}
-                onChange={(e) => setNodePreferences({
-                  ...nodePreferences,
-                  [currentUser.id]: { ...activeUserPref, strategy: e.target.value }
-                })}
-                className="w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm text-white focus:outline-none focus:border-amber-500"
-              >
-                <option value="auto">🤖 Autonomous DRL Agent (PPO Optimization)</option>
-                <option value="force_sell">🟢 Force P2P Export (Producer Mode)</option>
-                <option value="force_buy">🔵 Force P2P Import (Consumer Mode)</option>
-                <option value="battery_hold">🔋 Reserve Energy for Home Storage</option>
-              </select>
-              <p className="text-[11px] text-slate-400 mt-2">
-                {activeUserPref.strategy === 'auto' && 'DRL agent dynamically decides buy/sell bids to maximize your cost savings.'}
-                {activeUserPref.strategy === 'force_sell' && 'Manually forces node to list all available solar generation as P2P seller bids.'}
-                {activeUserPref.strategy === 'force_buy' && 'Manually forces node to consume P2P microgrid energy before grid imports.'}
-                {activeUserPref.strategy === 'battery_hold' && 'Bypasses P2P market to charge local battery reserve first.'}
-              </p>
-            </div>
-
-            {/* Asset Threshold Controls */}
-            <div className="bg-slate-900/60 p-4 rounded-lg border border-slate-700">
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Target Tariff Threshold (₹/kWh): <strong className="text-amber-400">₹{activeUserPref.maxSellPrice || 3.50}</strong>
-              </label>
-              <input
-                type="range"
-                min="2.50"
-                max="5.25"
-                step="0.10"
-                value={activeUserPref.maxSellPrice || 3.50}
-                onChange={(e) => setNodePreferences({
-                  ...nodePreferences,
-                  [currentUser.id]: { ...activeUserPref, maxSellPrice: parseFloat(e.target.value) }
-                })}
-                className="w-full accent-amber-500 cursor-pointer mb-2"
-              />
-              <span className="text-[11px] text-slate-400">Will not execute trades if market price moves beyond this limit.</span>
-            </div>
-
-            {/* Hardware Status */}
-            <div className="bg-slate-900/60 p-4 rounded-lg border border-slate-700 flex flex-col justify-between">
-              <div>
-                <span className="text-xs font-semibold text-slate-300 block mb-2">Hardware Telemetry</span>
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-slate-400">Solar PV Capacity:</span>
-                  <span className="text-amber-400 font-mono">{currentUser.solarCap}</span>
-                </div>
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-slate-400">Battery Capacity:</span>
-                  <span className="text-cyan-400 font-mono">{currentUser.batCap}</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-emerald-400 font-medium">
-                <BatteryCharging className="w-4 h-4" /> Battery SoC: 68% (Healthy)
-              </div>
-            </div>
-
-          </div>
-        </div>
-      ) : (
-        <div className="bg-slate-800/80 p-4 rounded-xl border border-cyan-500/30 mb-8 flex justify-between items-center">
-          <span className="text-sm font-semibold text-cyan-300 flex items-center gap-2">
-            <Lock className="w-4 h-4" /> System Admin View Active: Observing all microgrid prosumer nodes
+          <span className="text-xs bg-emerald-500/10 text-emerald-400 px-3 py-0.5 rounded border border-emerald-500/20 font-medium">
+            Authenticated Session
           </span>
-          <span className="text-xs text-slate-400">Global Overrides Enabled</span>
         </div>
-      )}
 
-      {/* KPI Cards Row */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-slate-900/60 p-4 rounded-lg border border-slate-700">
+            <label className="block text-xs font-semibold text-slate-300 mb-2">Trading Strategy</label>
+            <select
+              value={activeUserPref.strategy}
+              onChange={(e) => setNodePreferences({
+                ...nodePreferences,
+                [currentUser.id]: { ...activeUserPref, strategy: e.target.value }
+              })}
+              className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-amber-500"
+            >
+              <option value="auto">Autonomous DRL Agent (PPO Optimization)</option>
+              <option value="force_sell">Force P2P Export (Producer Mode)</option>
+              <option value="force_buy">Force P2P Import (Consumer Mode)</option>
+              <option value="battery_hold">Battery Energy Reserve Mode</option>
+            </select>
+          </div>
+
+          <div className="bg-slate-900/60 p-4 rounded-lg border border-slate-700">
+            <label className="block text-xs font-semibold text-slate-300 mb-1">
+              Target Tariff Limit: <strong className="text-amber-400">₹{activeUserPref.maxSellPrice || 3.50}/kWh</strong>
+            </label>
+            <input
+              type="range"
+              min="2.50"
+              max="6.00"
+              step="0.10"
+              value={activeUserPref.maxSellPrice || 3.50}
+              onChange={(e) => setNodePreferences({
+                ...nodePreferences,
+                [currentUser.id]: { ...activeUserPref, maxSellPrice: parseFloat(e.target.value) }
+              })}
+              className="w-full accent-amber-500 cursor-pointer mb-1"
+            />
+          </div>
+
+          <div className="bg-slate-900/60 p-4 rounded-lg border border-slate-700 flex flex-col justify-between">
+            <div>
+              <span className="text-xs font-semibold text-slate-300 block mb-2">Hardware Telemetry</span>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-slate-400">PV Capacity:</span>
+                <span className="text-amber-400 font-mono">{currentUser.solarCap} kW</span>
+              </div>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-slate-400">Battery Reserve:</span>
+                <span className="text-cyan-400 font-mono">{currentUser.batCap} kWh</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-emerald-400 font-medium">
+              <BatteryCharging className="w-4 h-4" /> Reserve Status: Nominal
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Metrics Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-        
         <div className="bg-slate-800/60 p-5 rounded-xl border border-slate-700/60 shadow-lg backdrop-blur">
-          <div className="flex justify-between items-center text-slate-400 text-sm mb-2">
-            <span>Market Clearing Price</span>
+          <div className="flex justify-between items-center text-slate-400 text-xs mb-2">
+            <span>Clearing Price</span>
             <Activity className="w-4 h-4 text-cyan-400" />
           </div>
           <div className="text-2xl font-bold text-white">
-            ₹{currentSlotData.mcp.toFixed(2)} <span className="text-xs font-normal text-slate-400">/ kWh</span>
+            ₹{currentSlotData.mcp?.toFixed(2) || '3.42'} <span className="text-xs font-normal text-slate-400">/ kWh</span>
           </div>
-          <span className="text-xs text-emerald-400 font-medium mt-1 inline-block">
-            ↓ {((1 - currentSlotData.mcp / 5.25) * 100).toFixed(1)}% vs Utility Rate
-          </span>
         </div>
 
         <div className="bg-slate-800/60 p-5 rounded-xl border border-slate-700/60 shadow-lg backdrop-blur">
-          <div className="flex justify-between items-center text-slate-400 text-sm mb-2">
+          <div className="flex justify-between items-center text-slate-400 text-xs mb-2">
             <span>24h Traded Volume</span>
             <Zap className="w-4 h-4 text-amber-400" />
           </div>
           <div className="text-2xl font-bold text-white">
-            {backendData?.summary?.total_p2p_traded || "14.28"} <span className="text-xs font-normal text-slate-400">kWh</span>
+            {telemetry?.summary?.total_p2p_traded || "14.28"} <span className="text-xs font-normal text-slate-400">kWh</span>
           </div>
-          <span className="text-xs text-slate-400 mt-1 inline-block">100% Peer-to-Peer Matched</span>
         </div>
 
         <div className="bg-slate-800/60 p-5 rounded-xl border border-slate-700/60 shadow-lg backdrop-blur">
-          <div className="flex justify-between items-center text-slate-400 text-sm mb-2">
-            <span>Cost Savings (PPO Agent)</span>
+          <div className="flex justify-between items-center text-slate-400 text-xs mb-2">
+            <span>Cost Savings</span>
             <TrendingUp className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-2xl font-bold text-emerald-400">
-            {backendData?.summary?.cost_savings_pct || "59.3"}%
+            {telemetry?.summary?.cost_savings_pct || "59.3"}%
           </div>
-          <span className="text-xs text-emerald-400 font-medium mt-1 inline-block">Verified vs Baseline</span>
         </div>
 
         <div className="bg-slate-800/60 p-5 rounded-xl border border-slate-700/60 shadow-lg backdrop-blur">
-          <div className="flex justify-between items-center text-slate-400 text-sm mb-2">
-            <span>On-Chain Ledger</span>
-            <Cpu className="w-4 h-4 text-cyan-400" />
+          <div className="flex justify-between items-center text-slate-400 text-xs mb-2">
+            <span>Active Prosumers</span>
+            <Users className="w-4 h-4 text-cyan-400" />
           </div>
           <div className="text-2xl font-bold text-cyan-300">
-            {activeLedgerLogs.length} Blocks
+            {nodes.length} Nodes
           </div>
-          <span className="text-xs text-slate-400 mt-1 inline-block">Ganache Auto-Mined</span>
         </div>
-
       </div>
 
-      {/* Main Graph & Control Section */}
+      {/* Chart and Order Book */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        
-        {/* Recharts Area Chart */}
         <div className="lg:col-span-2 bg-slate-800/60 p-6 rounded-xl border border-slate-700/60 shadow-lg backdrop-blur">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
             <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Activity className="text-amber-400 w-5 h-5" />
-                24-Hour Telemetry: Solar PV Generation vs Household Load
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <Activity className="text-amber-400 w-4 h-4" />
+                24-Hour Telemetry: Solar Generation vs Demand Load
               </h2>
-              <p className="text-xs text-slate-400">
-                Viewing profile for: <strong className="text-amber-400">{currentUser.name}</strong>
-              </p>
             </div>
           </div>
 
-          {/* Time Controls */}
           <div className="flex items-center gap-4 mb-4 bg-slate-900/50 p-3 rounded-lg border border-slate-800 text-xs">
             <button
               onClick={() => setIsPlaying(!isPlaying)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-500 text-slate-950 font-bold hover:bg-amber-400 transition"
+              className="flex items-center gap-1.5 px-3 py-1 rounded bg-amber-500 text-slate-950 font-bold hover:bg-amber-400 transition"
             >
-              {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
               {isPlaying ? 'Pause' : 'Auto Step 24h'}
             </button>
-            <span className="text-slate-400">Time Slot: <strong className="text-amber-400">{currentSlotData.time}</strong></span>
+            <span className="text-slate-400">Slot: <strong className="text-amber-400">{currentSlotData.hour}</strong></span>
             <input
               type="range"
               min="0"
@@ -392,95 +487,77 @@ useEffect(() => {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="time" stroke="#94A3B8" />
+                <XAxis dataKey="hour" stroke="#94A3B8" />
                 <YAxis stroke="#94A3B8" />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0F172A', borderColor: '#334155', color: '#F8FAFC' }}
-                  itemStyle={{ color: '#F8FAFC' }}
+                <Tooltip contentStyle={{ backgroundColor: '#0F172A', borderColor: '#334155', color: '#F8FAFC' }} />
+                <ReferenceLine 
+                  x={currentSlotData.hour} 
+                  stroke="#F59E0B" 
+                  strokeDasharray="3 3" 
+                  strokeWidth={2} 
                 />
-                <Area
-                  type="monotone"
-                  dataKey="solar"
-                  name="Solar PV Output (kW)"
-                  stroke="#F59E0B"
-                  fillOpacity={1}
-                  fill="url(#colorSolar)"
-                  strokeWidth={2.5}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="load"
-                  name="Demand Load (kW)"
-                  stroke="#06B6D4"
-                  fillOpacity={1}
-                  fill="url(#colorLoad)"
-                  strokeWidth={2.5}
-                />
+                <Area type="monotone" dataKey="solar_pv" name="Solar PV Output (kW)" stroke="#F59E0B" fillOpacity={1} fill="url(#colorSolar)" strokeWidth={2} />
+                <Area type="monotone" dataKey="load_demand" name="Demand Load (kW)" stroke="#06B6D4" fillOpacity={1} fill="url(#colorLoad)" strokeWidth={2} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Live Double Auction Matrix */}
         <div className="bg-slate-800/60 p-6 rounded-xl border border-slate-700/60 shadow-lg backdrop-blur">
-          <h2 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
-            <Activity className="text-cyan-400 w-5 h-5" />
-            Pay-as-Bid Auction Matrix
+          <h2 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
+            <Activity className="text-cyan-400 w-4 h-4" />
+            Market Order Book
           </h2>
-          <p className="text-xs text-slate-400 mb-4">Slot #{activeSlot} ({currentSlotData.time})</p>
+          <p className="text-xs text-slate-400 mb-4">Slot #{activeSlot} ({currentSlotData.hour})</p>
 
-          <div className="space-y-3 text-sm">
-            <div className={`p-3 rounded-lg border ${currentUser.id === 'bob' ? 'bg-amber-950/60 border-amber-400' : 'bg-slate-900/60 border-slate-700'}`}>
-              <div className="flex justify-between items-center mb-1">
-                <span className="font-semibold text-amber-400">
-                  Seller: Bob (Node-1) {currentUser.id === 'bob' && '(YOU)'}
-                </span>
-                <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-mono">
-                  ASK: ₹3.50/kWh
-                </span>
-              </div>
-              <span className="text-xs text-slate-400">Surplus PV Generation: {currentSlotData.solar} kW</span>
-            </div>
+          <div className="space-y-3 text-xs max-h-80 overflow-y-auto pr-1">
+            {nodes.map((node) => {
+              const isSelf = currentUser.id === node.id;
+              const pref = isSelf ? activeUserPref : (nodePreferences[node.id] || { strategy: 'auto', maxSellPrice: 3.50 });
+              
+              const isDaytime = activeSlot >= 6 && activeSlot <= 18;
+              const currentSolar = isDaytime ? Math.max(0, node.solarCap * Math.sin((Math.PI * (activeSlot - 6)) / 12)).toFixed(1) : '0.0';
+              const isSeller = parseFloat(currentSolar) > 1.5 || pref.strategy === 'force_sell';
+              const displayPrice = (pref.maxSellPrice || (isSeller ? 3.50 : 3.80)).toFixed(2);
 
-            <div className={`p-3 rounded-lg border ${currentUser.id === 'alice' ? 'bg-cyan-950/60 border-cyan-400' : 'bg-slate-900/60 border-slate-700'}`}>
-              <div className="flex justify-between items-center mb-1">
-                <span className="font-semibold text-cyan-400">
-                  Buyer: Alice (Node-2) {currentUser.id === 'alice' && '(YOU)'}
-                </span>
-                <span className="text-xs bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded font-mono">
-                  BID: ₹3.80/kWh
-                </span>
-              </div>
-              <span className="text-xs text-slate-400">Deficit Load Demand: {currentSlotData.load} kW</span>
-            </div>
-
-            <div className="p-3 bg-emerald-950/40 rounded-lg border border-emerald-500/40">
-              <div className="flex justify-between items-center">
-                <div>
-                  <span className="font-semibold block text-emerald-400">Cleared Trade Status</span>
-                  <span className="text-xs text-slate-300">
-                    Volume: {Math.min(currentSlotData.solar, currentSlotData.load).toFixed(2)} kWh @ ₹{currentSlotData.mcp.toFixed(2)}
+              return (
+                <div
+                  key={node.id}
+                  className={`p-3 rounded-lg border ${
+                    isSelf
+                      ? isSeller
+                        ? 'bg-amber-950/60 border-amber-400'
+                        : 'bg-cyan-950/60 border-cyan-400'
+                      : 'bg-slate-900/60 border-slate-700'
+                  }`}
+                >
+                  <div className="flex justify-between items-center mb-1">
+                    <span className={`font-semibold ${isSeller ? 'text-amber-400' : 'text-cyan-400'}`}>
+                      {node.name} {isSelf && '(You)'}
+                    </span>
+                    <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">
+                      {isSeller ? `ASK: ₹${displayPrice}` : `BID: ₹${displayPrice}`}
+                    </span>
+                  </div>
+                  <span className="text-slate-400">
+                    {isSeller ? `Surplus: ${currentSolar} kW` : `Deficit: ${(node.batCap * 0.2).toFixed(1)} kW`}
                   </span>
                 </div>
-                <span className="bg-emerald-500/20 text-emerald-300 text-xs px-2.5 py-1 rounded font-bold">
-                  MATCHED
-                </span>
-              </div>
-            </div>
+              );
+            })}
           </div>
         </div>
-
       </div>
 
-      {/* On-Chain Audit Stream Table */}
+      {/* Audit Log Table */}
       <div className="bg-slate-800/60 p-6 rounded-xl border border-slate-700/60 shadow-lg backdrop-blur">
-        <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-          <ShieldCheck className="text-cyan-400 w-5 h-5" />
-          On-Chain Ethereum Settlement Audit Feed (Ganache)
+        <h2 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+          <ShieldCheck className="text-cyan-400 w-4 h-4" />
+          On-Chain Settlement Audit Feed
         </h2>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-sm">
+          <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="border-b border-slate-700 text-slate-400">
                 <th className="py-2.5 px-3">Block #</th>
@@ -491,10 +568,10 @@ useEffect(() => {
               </tr>
             </thead>
             <tbody>
-              {activeLedgerLogs.map((tx, idx) => (
+              {ledgerLogs.map((tx, idx) => (
                 <tr key={tx.hash || idx} className="border-b border-slate-700/50 hover:bg-slate-800/40 transition">
                   <td className="py-3 px-3 font-semibold text-cyan-400">#{tx.block}</td>
-                  <td className="py-3 px-3 font-mono text-xs text-slate-400">{tx.hash.substring(0, 24)}...</td>
+                  <td className="py-3 px-3 font-mono text-slate-400">{tx.hash.substring(0, 24)}...</td>
                   <td className="py-3 px-3">{tx.seller} → {tx.buyer}</td>
                   <td className="py-3 px-3 font-medium text-amber-300">{tx.volume}</td>
                   <td className="py-3 px-3 font-semibold text-emerald-400">{tx.price}</td>
