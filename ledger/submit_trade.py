@@ -1,52 +1,53 @@
 import json
 from web3 import Web3
 
-# Connect to local Ganache RPC Server
-GANACHE_URL = "http://127.0.0.1:7545"
-w3 = Web3(Web3.HTTPProvider(GANACHE_URL))
+w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:7545"))
+CONTRACT_ADDRESS = "0xYourDeployedContractAddressHere"
 
-def log_trades_to_blockchain(cleared_trades: list):
-    """
-    Submits real transactions to local Ganache node to populate TRANSACTIONS & BLOCKS tabs.
-    """
+CONTRACT_ABI = json.loads('''[
+    {
+        "inputs": [
+            {"internalType": "string", "name": "seller", "type": "string"},
+            {"internalType": "string", "name": "buyer", "type": "string"},
+            {"internalType": "uint256", "name": "volumeWh", "type": "uint256"},
+            {"internalType": "uint256", "name": "pricePaise", "type": "uint256"},
+            {"internalType": "uint256", "name": "slot", "type": "uint256"}
+        ],
+        "name": "recordTrade",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    }
+]''')
+
+def log_trades_to_blockchain(cleared_trades, slot, sender_address, private_key):
     if not w3.is_connected():
-        print("[LEDGER WARN] Ganache local node not connected on http://127.0.0.1:7545! Skipping on-chain settlement.")
         return []
 
-    # Use primary accounts from Ganache
-    sender_account = w3.eth.accounts[0]
-    receiver_account = w3.eth.accounts[1]
-    
+    contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=CONTRACT_ABI)
     tx_hashes = []
 
     for trade in cleared_trades:
-        # Construct real transaction payload
-        tx_payload = {
-            'from': sender_account,
-            'to': receiver_account,
-            'value': w3.to_wei(0.0001, 'ether'),
+        vol_wh = int(trade["volume_kwh"] * 1000)
+        price_paise = int(trade["price_inr"] * 100)
+        nonce = w3.eth.get_transaction_count(sender_address)
+
+        txn = contract.functions.recordTrade(
+            str(trade["seller_id"]),
+            str(trade["buyer_id"]),
+            vol_wh,
+            price_paise,
+            int(slot)
+        ).build_transaction({
+            'chainId': 1337,
             'gas': 200000,
             'gasPrice': w3.to_wei('20', 'gwei'),
-            'data': w3.to_hex(text=json.dumps({
-                "seller": trade["seller_id"],
-                "buyer": trade["buyer_id"],
-                "vol_kw": trade["volume_kw"],
-                "price": trade["cleared_price"]
-            }))
-        }
-        
-        # Send transaction directly to Ganache
-        tx_hash = w3.eth.send_transaction(tx_payload)
-        tx_hash_hex = tx_hash.hex()
-        tx_hashes.append(tx_hash_hex)
-        print(f"[ON-CHAIN LEDGER] Trade Recorded: {trade['seller_id'].upper()} -> {trade['buyer_id'].upper()} | {trade['volume_kw']}kW @ ₹{trade['cleared_price']} | TxHash: {tx_hash_hex}")
+            'from': sender_address,
+            'nonce': nonce,
+        })
+
+        signed_txn = w3.eth.account.sign_transaction(txn, private_key=private_key)
+        tx_hash = w3.eth.send_raw_transaction(signed_txn.rawTransaction)
+        tx_hashes.append(w3.to_hex(tx_hash))
 
     return tx_hashes
-
-if __name__ == "__main__":
-    sample_trades = [
-        {"seller_id": "bob", "buyer_id": "alice", "volume_kw": 0.74, "cleared_price": 0.68, "total_cost": 0.50},
-        {"seller_id": "bob", "buyer_id": "david", "volume_kw": 0.40, "cleared_price": 0.70, "total_cost": 0.28}
-    ]
-    print("--- Testing Real Smart Contract Ledger Broadcast ---")
-    log_trades_to_blockchain(sample_trades)
