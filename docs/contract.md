@@ -1,4 +1,5 @@
-# ESP32 Hardware & Backend HTTP Adapter Contract
+# ASTRA — Automated Smart Trading & Routing Agent
+## ESP32 Hardware & Backend HTTP Adapter Contract
 
 ## Protocol Overview
 Communicates via HTTP POST requests authenticated using HMAC-SHA256 headers.

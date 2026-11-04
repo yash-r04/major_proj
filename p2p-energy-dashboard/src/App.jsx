@@ -142,9 +142,9 @@ export default function App() {
               <Zap className="text-amber-400 w-7 h-7" />
             </div>
           </div>
-          <h2 className="text-xl font-bold text-center text-white mb-1">P2P Energy Network Access</h2>
+          <h2 className="text-xl font-bold text-center text-white mb-1">ASTRA Gateway</h2>
           <p className="text-xs text-slate-400 text-center mb-6">
-            Authenticate prosumer node credentials
+            Automated Smart Trading & Routing Agent • Prosumer Portal
           </p>
 
           {authError && (
@@ -285,8 +285,8 @@ export default function App() {
           )}
 
           <div className="mt-6 pt-4 border-t border-slate-800 text-center text-xs text-slate-500 flex justify-between items-center">
-            <span>Flask Engine (Port 5000)</span>
-            <span className="text-amber-400 font-mono">{nodes.length} Registered Nodes</span>
+            <span>ASTRA Engine (Port 5000)</span>
+            <span className="text-amber-400 font-mono">{nodes.length} Active Nodes</span>
           </div>
         </div>
       </div>
@@ -302,15 +302,15 @@ export default function App() {
         <div>
           <h1 className="text-xl font-bold flex items-center gap-2 text-white">
             <Zap className="text-amber-400" />
-            P2P Microgrid Dashboard
+            ASTRA — Automated Smart Trading & Routing Agent
           </h1>
-          <p className="text-xs text-slate-400">PPO DRL Agent • Midpoint Double Auction Market • Web3 Audit Ledger</p>
+          <p className="text-xs text-slate-400">PPO DRL Core • Midpoint Double Auction Market • Web3 Settlement Audit</p>
         </div>
         
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700 text-xs">
             <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`}></span>
-            <span className="text-slate-300">{isConnected ? 'Backend Active' : 'Offline'}</span>
+            <span className="text-slate-300">{isConnected ? 'ASTRA Core Active' : 'Offline'}</span>
             <button onClick={fetchBackendData} className="ml-1 text-slate-400 hover:text-white" title="Refresh Telemetry">
               <RefreshCw className={`w-3.5 h-3.5 ${isPolling ? 'animate-spin text-amber-400' : ''}`} />
             </button>
@@ -338,7 +338,7 @@ export default function App() {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 pb-3 border-b border-slate-700">
           <div className="flex items-center gap-2">
             <Sliders className="text-amber-400 w-4 h-4" />
-            <h2 className="text-sm font-bold text-white">Node Parameters: {currentUser.name}</h2>
+            <h2 className="text-sm font-bold text-white">ASTRA Policy Parameters: {currentUser.name}</h2>
           </div>
           <span className="text-xs bg-emerald-500/10 text-emerald-400 px-3 py-0.5 rounded border border-emerald-500/20 font-medium">
             Authenticated Session
@@ -356,7 +356,7 @@ export default function App() {
               })}
               className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-amber-500"
             >
-              <option value="auto">Autonomous DRL Agent (PPO Optimization)</option>
+              <option value="auto">Autonomous ASTRA Agent (PPO Optimization)</option>
               <option value="force_sell">Force P2P Export (Producer Mode)</option>
               <option value="force_buy">Force P2P Import (Consumer Mode)</option>
               <option value="battery_hold">Battery Energy Reserve Mode</option>
@@ -424,7 +424,7 @@ export default function App() {
 
         <div className="bg-slate-800/60 p-5 rounded-xl border border-slate-700/60 shadow-lg backdrop-blur">
           <div className="flex justify-between items-center text-slate-400 text-xs mb-2">
-            <span>Cost Savings</span>
+            <span>ASTRA Cost Savings</span>
             <TrendingUp className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-2xl font-bold text-emerald-400">
@@ -506,7 +506,7 @@ export default function App() {
         <div className="bg-slate-800/60 p-6 rounded-xl border border-slate-700/60 shadow-lg backdrop-blur">
           <h2 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
             <Activity className="text-cyan-400 w-4 h-4" />
-            Market Order Book
+            ASTRA Market Order Book
           </h2>
           <p className="text-xs text-slate-400 mb-4">Slot #{activeSlot} ({currentSlotData.hour})</p>
 

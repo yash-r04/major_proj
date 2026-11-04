@@ -53,11 +53,10 @@ def home():
     """Root route to verify server status."""
     return jsonify(
         status="active",
-        service="ESP32 Hardware Adapter & P2P Trading Engine",
+        service="ASTRA — Automated Smart Trading & Routing Agent",
         decide_endpoint="/api/decide",
         model_loaded=MODEL_OK
     )
-
 
 @app.get("/api/telemetry/24h")
 def get_24h_telemetry():
