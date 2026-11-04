@@ -1,79 +1,57 @@
-import os
 import numpy as np
-from stable_baselines3 import PPO
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "ppo_universal_agent.zip")
+MAX_TRA_KW = 5.0      # Max grid/P2P transfer (kW)
+MIN_PRICE = 2.50      # Feed-in tariff floor (₹/kWh)
+MAX_PRICE = 6.00      # Grid import tariff ceiling (₹/kWh)
+MAX_FLEX_KW = 1.5     # Max flex load (kW)
 
-print("Loading PPO model...")
-try:
-    model = PPO.load(MODEL_PATH)
-    print("Model loaded successfully!")
-except Exception as e:
-    print(f"Error loading model: {e}")
-    model = None
+def scale_actions(raw_action):
+    """Rescales PPO continuous outputs from [-1, 1] to real units."""
+    a0, a1, a2 = raw_action[0], raw_action[1], raw_action[2]
+    e_tra_kw = float(a0 * MAX_TRA_KW)
+    bid_price = float(MIN_PRICE + (a1 + 1.0) * 0.5 * (MAX_PRICE - MIN_PRICE))
+    flex_kw = float((a2 + 1.0) * 0.5 * MAX_FLEX_KW)
+    return e_tra_kw, bid_price, flex_kw
 
-def decide(meter_payload: dict) -> dict:
-    prosumer_id = meter_payload.get("id")
-    ts = meter_payload.get("ts", 0)
-    pv_kw = float(meter_payload.get("pv_kw", 0.0))
-    load_kw = float(meter_payload.get("load_kw", 0.0))
-    soc = float(meter_payload.get("soc", 0.5))
-    profile = meter_payload.get("profile", "economic")
-    
-    # Calculate current hour slot (0 to 23)
-    slot = (ts // 3600) % 24
-    
-    # --- Construct the 10-element state vector expected by your mini_proj model ---
-    # [pv, load, soc, slot/24, net_power, profile_code, 0, 0, 0, 0]
-    profile_code = 1.0 if profile == "economic" else (2.0 if profile == "environmental" else 3.0)
-    net_power = pv_kw - load_kw
-    
-    # 10-element observation matching Box(10,)
-    obs = np.array([
-        pv_kw, 
-        load_kw, 
-        soc, 
-        slot / 24.0, 
-        net_power, 
-        profile_code, 
-        0.0, 0.0, 0.0, 0.0
+def build_obs_vector(pv, load, soc, slot, profile):
+    """Builds 10-element state embedding profile preference weights (omega)."""
+    profile_map = {
+        "economic": (0.8, 0.1, 0.1),
+        "autarky": (0.2, 0.2, 0.6),
+        "environmental": (0.3, 0.6, 0.1)
+    }
+    w_cost, w_batt, w_grid = profile_map.get(profile, (0.5, 0.25, 0.25))
+
+    return np.array([
+        float(pv), float(load), float(soc),
+        float(MAX_PRICE), float(MIN_PRICE), float(slot),
+        float(w_cost), float(w_batt), float(w_grid), 0.0
     ], dtype=np.float32)
-    
-    # --- Model Inference ---
-    if model is not None:
-        action, _states = model.predict(obs, deterministic=True)
-        
-        # Ensure action is parsed cleanly regardless of 1D or 2D array output
-        action = np.atleast_1d(action)
-        e_tra_kw = round(float(action[0]), 2)
-        bid_price = round(float(action[1]), 2) if len(action) > 1 else 4.00
-    else:
-        e_tra_kw = round(net_power * 0.85, 2)
-        bid_price = 4.25 if profile == "economic" else 3.80
 
-    ess_kw = round(-e_tra_kw, 2)
+def decide(payload, model=None):
+    pv = float(payload.get("pv_kw", 0.0))
+    load = float(payload.get("load_kw", 0.0))
+    soc = float(payload.get("soc", 0.5))
+    ts = payload.get("ts", 0)
+    slot = payload.get("slot", (ts // 3600) % 24)
+    profile = payload.get("profile", "economic")
+
+    if model is not None:
+        obs = build_obs_vector(pv, load, soc, slot, profile)
+        raw_action, _ = model.predict(obs, deterministic=True)
+        e_tra_kw, bid_price, flex_kw = scale_actions(raw_action)
+    else:
+        e_tra_kw = pv - load
+        bid_price = 4.00
+        flex_kw = 0.0
+
+    # ESS conservation equation: ess = e_tra - pv + load
+    ess_kw = float(e_tra_kw - pv + load)
 
     return {
-        "id": prosumer_id,
-        "ts": ts + 10,
-        "slot": slot,
-        "e_tra_kw": e_tra_kw,
-        "bid_price": bid_price,
-        "ess_kw": ess_kw,
-        "shift_flag": 0,
-        "ref_trade_id": f"trd_{prosumer_id}_{ts}"
+        "e_tra_kw": round(e_tra_kw, 3),
+        "ess_kw": round(ess_kw, 3),
+        "bid_price": round(bid_price, 2),
+        "flex_kw": round(flex_kw, 3),
+        "penalty": 0.0
     }
-
-if __name__ == "__main__":
-    sample_payload = {
-        "id": "alice",
-        "ts": 1714589000,
-        "pv_kw": 3.45,
-        "load_kw": 1.20,
-        "soc": 0.65,
-        "profile": "economic",
-        "seq": 104,
-        "sig": "sig_test"
-    }
-    print("Testing Decision:")
-    print(decide(sample_payload))
