@@ -8,7 +8,7 @@ import numpy as np
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agent.inference import decide
-from market.clearing import clear_market
+from market.clearing import clear_slot
 
 prosumers = [
     {"id": "alice", "profile": "economic", "soc": 0.60},
@@ -44,23 +44,21 @@ def run_market_simulation(slots=3):
         for p in prosumers:
             telemetry = generate_telemetry(p, slot + 1, slot)
             command = decide(telemetry)
+            command['id'] = p['id']
             slot_bids.append(command)
             print(f"[{p['id'].upper()}] PV={telemetry['pv_kw']}kW | Load={telemetry['load_kw']}kW | Bid Vol={command['e_tra_kw']}kW | Price=₹{command['bid_price']}")
 
-        # 2. Clear Market with Pay-as-Bid Auction
-        market_result = clear_market(slot_bids)
-        
+        # 2. Clear the market (midpoint double auction, leftovers go to the grid)
+        r = clear_slot(slot_bids)
+
         print("\n--- MARKET CLEARING SUMMARY ---")
-        print(f"Market Clearing Price (MCP) : ₹{market_result['slot_mcp']}/kWh")
-        print(f"Total P2P Traded Volume     : {market_result['p2p_cleared_volume_kw']} kWh")
-        print(f"Grid Import Deficit         : {market_result['grid_import_kw']} kWh (Cost: ₹{market_result['grid_import_cost']})")
-        print(f"Grid Export Surplus         : {market_result['grid_export_kw']} kWh (Rev: ₹{market_result['grid_export_revenue']})")
-        
-        if market_result['trades']:
-            print("Cleared Peer-to-Peer Trades:")
-            for t in market_result['trades']:
-                print(f"  * {t['seller_id'].upper()} ---> {t['buyer_id'].upper()} : {t['volume_kw']} kW @ ₹{t['cleared_price']}/kWh (Total: ₹{t['total_cost']})")
-        else:
+        print(f"Market Clearing Price (MCP) : {'Rs %s/kWh' % r['mcp'] if r['mcp'] is not None else 'no P2P trades'}")
+        print(f"Total P2P Traded Volume     : {r['p2p_kwh']} kWh")
+        print(f"Grid Import Deficit         : {r['grid_import_kwh']} kWh (Cost: Rs {r['grid_import_cost']})")
+        print(f"Grid Export Surplus         : {r['grid_export_kwh']} kWh (Rev: Rs {r['grid_export_revenue']})")
+        for t in r["trades"]:
+            print(f"  * {t['seller_id'].upper()} ---> {t['buyer_id'].upper()} : {t['volume_kwh']} kWh @ Rs {t['price_inr']}/kWh")
+        if not r["trades"]:
             print("No direct P2P matches cleared this slot; fallback to grid.")
         print("\n")
 
