@@ -1,4 +1,13 @@
-import json
+"""
+Writes cleared trades and penalties to the EnergyLedger contract.
+
+Configuration (environment variables, all optional):
+  GANACHE_URL      RPC endpoint, default http://127.0.0.1:7545   ("test" = in-memory test chain)
+  ASTRA_PRIVATE_KEY  if set, transactions are signed locally with this key;
+                     if not set, the first unlocked account (Ganache default) is used
+  ASTRA_CONTRACT   contract address; otherwise read from ledger/deployment.json
+"""
+import json, os, threading
 from web3 import Web3
 
 w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:7545"))
@@ -23,6 +32,14 @@ CONTRACT_ABI = json.loads('''[
 def log_trades_to_blockchain(cleared_trades, slot, sender_address, private_key):
     if not w3.is_connected():
         return []
+    c = _state["contract"]
+    out = []
+    for t in cleared_trades:
+        out.append(_send(c.functions.recordTrade(
+            str(t["seller_id"]), str(t["buyer_id"]),
+            int(round(t["volume_kwh"] * 1000)), int(round(t["price_inr"] * 100)), int(slot))))
+    return out
+
 
     contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=CONTRACT_ABI)
     tx_hashes = []
