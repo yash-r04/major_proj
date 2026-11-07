@@ -148,7 +148,7 @@ def api_decide():
     if d.get("id") != dev:
         return jsonify(error="id mismatch"), 403
     if abs(time.time() - d["ts"]) > TS_WINDOW_S:
-        return jsonify(error="timestamp out of window"), 400
+        return jsonify(error="timestamp out of window", server_time=int(time.time()), device_ts=d["ts"]), 400
     if d["seq"] <= last_seq.get(dev, -1):
         return jsonify(error="replay"), 409
     last_seq[dev] = d["seq"]
@@ -204,6 +204,12 @@ def home():
                    decide_endpoint="/api/decide", model_loaded=MODEL is not None,
                    model_error=MODEL_ERR, ledger_ready=ledger_ready(),
                    ledger_error=None if ledger_ready() else ledger_error())
+
+
+@app.get("/api/time")
+def api_time():
+    """Lets a device without internet/NTP set its clock from the backend."""
+    return jsonify(epoch=int(time.time()))
 
 
 @app.get("/api/live")

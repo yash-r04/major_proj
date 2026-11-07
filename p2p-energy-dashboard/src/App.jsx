@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from 'recharts';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { Activity, ShieldCheck, Zap, TrendingUp, UserCheck, LogOut, Sliders, BatteryCharging, UserPlus, Users, RefreshCw, AlertCircle } from 'lucide-react';
 
 // Default registered microgrid prosumers with internal security credentials
@@ -22,10 +22,8 @@ export default function App() {
   const [newNode, setNewNode] = useState({ name: '', pass: '', role: 'Solar Heavy', solarCap: '3.5', batCap: '7.0' });
 
   // Telemetry & Polling State
-  const [activeSlot, setActiveSlot] = useState(12);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [nodePreferences, setNodePreferences] = useState({});
-  const [telemetry, setTelemetry] = useState(null);
+  const [history, setHistory] = useState([]);
   const [ledgerLogs, setLedgerLogs] = useState([]);
   const [live, setLive] = useState(null);
   const [ledgerSim, setLedgerSim] = useState(true);
@@ -36,10 +34,10 @@ export default function App() {
   const fetchBackendData = async () => {
     setIsPolling(true);
     try {
-      const telRes = await fetch('http://127.0.0.1:5000/api/telemetry/24h');
-      if (telRes.ok) {
-        const telJson = await telRes.json();
-        setTelemetry(telJson);
+      const histRes = await fetch('http://127.0.0.1:5000/api/history?id=alice&limit=60');
+      if (histRes.ok) {
+        const histJson = await histRes.json();
+        setHistory(histJson.data || []);
         setIsConnected(true);
       }
 
@@ -64,17 +62,6 @@ export default function App() {
     const interval = setInterval(fetchBackendData, 2000);
     return () => clearInterval(interval);
   }, []);
-
-  // Timer loop for auto-stepping 24h simulation
-  useEffect(() => {
-    let timer;
-    if (isPlaying) {
-      timer = setInterval(() => {
-        setActiveSlot((prev) => (prev + 1) % 24);
-      }, 1200);
-    }
-    return () => clearInterval(timer);
-  }, [isPlaying]);
 
   // Onboard New Participant Node
   const handleRegisterNode = (e) => {
@@ -122,20 +109,7 @@ export default function App() {
     setPassphrase('');
   };
 
-  const chartData = telemetry?.data || Array.from({ length: 24 }, (_, i) => {
-    const hourStr = `${i.toString().padStart(2, '0')}:00`;
-    const solar = i >= 6 && i <= 18 ? Math.max(0, 5.0 * Math.sin((Math.PI * (i - 6)) / 12)) : 0;
-    const load = 1.2 + 1.5 * Math.exp(-Math.pow(i - 8, 2) / 4) + 2.0 * Math.exp(-Math.pow(i - 20, 2) / 4);
-    const mcp = Math.max(2.50, 5.25 - (solar * 0.45));
-    return {
-      hour: hourStr,
-      solar_pv: parseFloat(solar.toFixed(2)),
-      load_demand: parseFloat(load.toFixed(2)),
-      mcp: parseFloat(mcp.toFixed(2))
-    };
-  });
-
-  const currentSlotData = chartData[activeSlot] || chartData[0];
+  const histData = history.map((r, i) => ({ ...r, idx: i }));
   const liveDevices = Object.values(live?.devices || {});
   const liveMarket = live?.market || {};
   const activeUserPref = nodePreferences[currentUser?.id] || { strategy: 'auto', maxSellPrice: 3.50 };
@@ -511,32 +485,15 @@ export default function App() {
             <div>
               <h2 className="text-sm font-bold text-white flex items-center gap-2">
                 <Activity className="text-amber-400 w-4 h-4" />
-                24-Hour Telemetry (simulated curve)
+                Live history: alice (ESP32)
               </h2>
+              <p className="text-xs text-slate-400 mt-1">Measured PV and load reported by the device, last 60 slots. Slot = simulated hour (10 s of real time).</p>
             </div>
-          </div>
-
-          <div className="flex items-center gap-4 mb-4 bg-slate-900/50 p-3 rounded-lg border border-slate-800 text-xs">
-            <button
-              onClick={() => setIsPlaying(!isPlaying)}
-              className="flex items-center gap-1.5 px-3 py-1 rounded bg-amber-500 text-slate-950 font-bold hover:bg-amber-400 transition"
-            >
-              {isPlaying ? 'Pause' : 'Auto Step 24h'}
-            </button>
-            <span className="text-slate-400">Slot: <strong className="text-amber-400">{currentSlotData.hour}</strong></span>
-            <input
-              type="range"
-              min="0"
-              max="23"
-              value={activeSlot}
-              onChange={(e) => setActiveSlot(Number(e.target.value))}
-              className="w-full accent-amber-500 cursor-pointer"
-            />
           </div>
 
           <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
+              <AreaChart data={histData}>
                 <defs>
                   <linearGradient id="colorSolar" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#F59E0B" stopOpacity={0.4} />
@@ -548,17 +505,11 @@ export default function App() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="hour" stroke="#94A3B8" />
+                <XAxis dataKey="idx" stroke="#94A3B8" tickFormatter={(i) => `S${histData[i]?.slot ?? ''}`} />
                 <YAxis stroke="#94A3B8" />
                 <Tooltip contentStyle={{ backgroundColor: '#0F172A', borderColor: '#334155', color: '#F8FAFC' }} />
-                <ReferenceLine 
-                  x={currentSlotData.hour} 
-                  stroke="#F59E0B" 
-                  strokeDasharray="3 3" 
-                  strokeWidth={2} 
-                />
-                <Area type="monotone" dataKey="solar_pv" name="Solar PV Output (kW)" stroke="#F59E0B" fillOpacity={1} fill="url(#colorSolar)" strokeWidth={2} />
-                <Area type="monotone" dataKey="load_demand" name="Demand Load (kW)" stroke="#06B6D4" fillOpacity={1} fill="url(#colorLoad)" strokeWidth={2} />
+                <Area type="monotone" dataKey="pv_kw" name="Solar PV Output (kW)" stroke="#F59E0B" fillOpacity={1} fill="url(#colorSolar)" strokeWidth={2} />
+                <Area type="monotone" dataKey="load_kw" name="Demand Load (kW)" stroke="#06B6D4" fillOpacity={1} fill="url(#colorLoad)" strokeWidth={2} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -569,40 +520,19 @@ export default function App() {
             <Activity className="text-cyan-400 w-4 h-4" />
             ASTRA Market Order Book
           </h2>
-          <p className="text-xs text-slate-400 mb-4">Slot #{activeSlot} ({currentSlotData.hour})</p>
+          <p className="text-xs text-slate-400 mb-4">Latest decision from each device</p>
 
           <div className="space-y-3 text-xs max-h-80 overflow-y-auto pr-1">
-            {nodes.map((node) => {
-              const isSelf = currentUser.id === node.id;
-              const pref = isSelf ? activeUserPref : (nodePreferences[node.id] || { strategy: 'auto', maxSellPrice: 3.50 });
-              
-              const isDaytime = activeSlot >= 6 && activeSlot <= 18;
-              const currentSolar = isDaytime ? Math.max(0, node.solarCap * Math.sin((Math.PI * (activeSlot - 6)) / 12)).toFixed(1) : '0.0';
-              const isSeller = parseFloat(currentSolar) > 1.5 || pref.strategy === 'force_sell';
-              const displayPrice = (pref.maxSellPrice || (isSeller ? 3.50 : 3.80)).toFixed(2);
-
+            {liveDevices.length === 0 && <p className="text-slate-400">No decisions yet.</p>}
+            {[...liveDevices].sort((a, b) => b.e_tra_kw - a.e_tra_kw).map((d) => {
+              const isSeller = d.e_tra_kw > 0;
               return (
-                <div
-                  key={node.id}
-                  className={`p-3 rounded-lg border ${
-                    isSelf
-                      ? isSeller
-                        ? 'bg-amber-950/60 border-amber-400'
-                        : 'bg-cyan-950/60 border-cyan-400'
-                      : 'bg-slate-900/60 border-slate-700'
-                  }`}
-                >
+                <div key={d.id} className={`p-3 rounded-lg border ${isSeller ? 'bg-amber-950/60 border-amber-400' : 'bg-cyan-950/60 border-cyan-400'}`}>
                   <div className="flex justify-between items-center mb-1">
-                    <span className={`font-semibold ${isSeller ? 'text-amber-400' : 'text-cyan-400'}`}>
-                      {node.name} {isSelf && '(You)'}
-                    </span>
-                    <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">
-                      {isSeller ? `ASK: ₹${displayPrice}` : `BID: ₹${displayPrice}`}
-                    </span>
+                    <span className={`font-semibold ${isSeller ? 'text-amber-400' : 'text-cyan-400'}`}>{d.id} ({d.profile})</span>
+                    <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">{isSeller ? 'ASK' : 'BID'}: ₹{d.bid_price?.toFixed(2)}</span>
                   </div>
-                  <span className="text-slate-400">
-                    {isSeller ? `Surplus: ${currentSolar} kW` : `Deficit: ${(node.batCap * 0.2).toFixed(1)} kW`}
-                  </span>
+                  <span className="text-slate-400">{isSeller ? 'Surplus' : 'Deficit'}: {Math.abs(d.e_tra_kw).toFixed(2)} kWh</span>
                 </div>
               );
             })}
